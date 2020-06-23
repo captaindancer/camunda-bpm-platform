@@ -17,11 +17,13 @@
 package org.camunda.bpm.engine.impl.cmd;
 
 import org.camunda.bpm.engine.impl.ProcessEngineLogger;
+import org.camunda.bpm.engine.impl.InititalizeTelemetryReporterCmd;
 import org.camunda.bpm.engine.impl.interceptor.Command;
 import org.camunda.bpm.engine.impl.interceptor.CommandContext;
 import org.camunda.bpm.engine.impl.persistence.entity.AuthorizationManager;
 import org.camunda.bpm.engine.impl.persistence.entity.PropertyEntity;
 import org.camunda.bpm.engine.impl.telemetry.TelemetryLogger;
+import org.camunda.bpm.engine.impl.telemetry.reporter.TelemetryReporter;
 
 public class TelemetryConfigureCmd implements Command<Object> {
 
@@ -45,6 +47,19 @@ public class TelemetryConfigureCmd implements Command<Object> {
       LOG.databaseTelemetryPropertyMissingInfo(telemetryEnabled);
       telemetryProperty = new PropertyEntity("camunda.telemetry.enabled", Boolean.toString(telemetryEnabled));
       commandContext.getPropertyManager().insert(telemetryProperty);
+    }
+
+    TelemetryReporter telemetryReporter = null;
+    if (telemetryEnabled) {
+      telemetryReporter = new InititalizeTelemetryReporterCmd().execute(commandContext); // changed this cmd 
+      //telemetryReporter = commandContext.getProcessEngineConfiguration().getTelemetryReporter();
+      commandContext.getProcessEngineConfiguration().setTelemetryReporter(telemetryReporter);
+      telemetryReporter.start();
+    } else {
+      telemetryReporter = commandContext.getProcessEngineConfiguration().getTelemetryReporter();
+      if (telemetryReporter != null) {
+        telemetryReporter.stop();
+      }
     }
 
     return null;

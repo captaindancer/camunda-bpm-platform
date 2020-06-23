@@ -40,9 +40,11 @@ import java.util.Map.Entry;
 import java.util.Properties;
 import java.util.Set;
 import java.util.concurrent.CopyOnWriteArraySet;
+
 import javax.naming.InitialContext;
 import javax.sql.DataSource;
 
+import org.apache.http.client.HttpClient;
 import org.apache.ibatis.builder.xml.XMLConfigBuilder;
 import org.apache.ibatis.datasource.pooled.PooledDataSource;
 import org.apache.ibatis.mapping.Environment;
@@ -95,9 +97,6 @@ import org.camunda.bpm.engine.impl.RuntimeServiceImpl;
 import org.camunda.bpm.engine.impl.ServiceImpl;
 import org.camunda.bpm.engine.impl.TaskServiceImpl;
 import org.camunda.bpm.engine.impl.application.ProcessApplicationManager;
-import org.camunda.bpm.engine.impl.batch.removaltime.BatchSetRemovalTimeJobHandler;
-import org.camunda.bpm.engine.impl.batch.removaltime.DecisionSetRemovalTimeJobHandler;
-import org.camunda.bpm.engine.impl.batch.removaltime.ProcessSetRemovalTimeJobHandler;
 import org.camunda.bpm.engine.impl.batch.BatchJobHandler;
 import org.camunda.bpm.engine.impl.batch.BatchMonitorJobHandler;
 import org.camunda.bpm.engine.impl.batch.BatchSeedJobHandler;
@@ -105,6 +104,9 @@ import org.camunda.bpm.engine.impl.batch.deletion.DeleteHistoricProcessInstances
 import org.camunda.bpm.engine.impl.batch.deletion.DeleteProcessInstancesJobHandler;
 import org.camunda.bpm.engine.impl.batch.externaltask.SetExternalTaskRetriesJobHandler;
 import org.camunda.bpm.engine.impl.batch.job.SetJobRetriesJobHandler;
+import org.camunda.bpm.engine.impl.batch.removaltime.BatchSetRemovalTimeJobHandler;
+import org.camunda.bpm.engine.impl.batch.removaltime.DecisionSetRemovalTimeJobHandler;
+import org.camunda.bpm.engine.impl.batch.removaltime.ProcessSetRemovalTimeJobHandler;
 import org.camunda.bpm.engine.impl.batch.update.UpdateProcessInstancesSuspendStateJobHandler;
 import org.camunda.bpm.engine.impl.bpmn.behavior.ExternalTaskActivityBehavior;
 import org.camunda.bpm.engine.impl.bpmn.deployer.BpmnDeployer;
@@ -184,6 +186,7 @@ import org.camunda.bpm.engine.impl.history.HistoryLevel;
 import org.camunda.bpm.engine.impl.history.HistoryRemovalTimeProvider;
 import org.camunda.bpm.engine.impl.history.event.HistoricDecisionInstanceManager;
 import org.camunda.bpm.engine.impl.history.event.HostnameProvider;
+import org.camunda.bpm.engine.impl.history.event.SimpleIpBasedProvider;
 import org.camunda.bpm.engine.impl.history.handler.CompositeDbHistoryEventHandler;
 import org.camunda.bpm.engine.impl.history.handler.CompositeHistoryEventHandler;
 import org.camunda.bpm.engine.impl.history.handler.DbHistoryEventHandler;
@@ -236,7 +239,6 @@ import org.camunda.bpm.engine.impl.jobexecutor.historycleanup.HistoryCleanupHelp
 import org.camunda.bpm.engine.impl.jobexecutor.historycleanup.HistoryCleanupJobHandler;
 import org.camunda.bpm.engine.impl.metrics.MetricsRegistry;
 import org.camunda.bpm.engine.impl.metrics.MetricsReporterIdProvider;
-import org.camunda.bpm.engine.impl.history.event.SimpleIpBasedProvider;
 import org.camunda.bpm.engine.impl.metrics.parser.MetricsBpmnParseListener;
 import org.camunda.bpm.engine.impl.metrics.parser.MetricsCmmnTransformListener;
 import org.camunda.bpm.engine.impl.metrics.reporter.DbMetricsReporter;
@@ -332,6 +334,8 @@ import org.camunda.bpm.engine.impl.scripting.engine.ScriptingEngines;
 import org.camunda.bpm.engine.impl.scripting.engine.VariableScopeResolverFactory;
 import org.camunda.bpm.engine.impl.scripting.env.ScriptEnvResolver;
 import org.camunda.bpm.engine.impl.scripting.env.ScriptingEnvironment;
+import org.camunda.bpm.engine.impl.telemetry.dto.Data;
+import org.camunda.bpm.engine.impl.telemetry.reporter.TelemetryReporter;
 import org.camunda.bpm.engine.impl.util.IoUtil;
 import org.camunda.bpm.engine.impl.util.ParseUtil;
 import org.camunda.bpm.engine.impl.util.ReflectUtil;
@@ -386,6 +390,8 @@ public abstract class ProcessEngineConfigurationImpl extends ProcessEngineConfig
   public static final int DEFAULT_FAILED_JOB_LISTENER_MAX_RETRIES = 3;
 
   public static final int DEFAULT_INVOCATIONS_PER_BATCH_JOB = 1;
+
+
 
   public static SqlSessionFactory cachedSqlSessionFactory;
 
@@ -874,6 +880,11 @@ public abstract class ProcessEngineConfigurationImpl extends ProcessEngineConfig
   protected boolean initializeTelemetry = false;
   /** The endpoint which telemetry is sent to */
   protected String telemetryEndpoint = "https://api.telemetry.camunda.cloud/pings";
+  protected TelemetryReporter telemetryReporter;
+  /** http client used for sending telemetry */
+  protected HttpClient telemetryHttpClient;
+  protected Data telemetryData;
+
 
   // buildProcessEngine ///////////////////////////////////////////////////////
 
@@ -937,7 +948,6 @@ public abstract class ProcessEngineConfigurationImpl extends ProcessEngineConfig
     initPermissionProvider();
     initHostName();
     initMetrics();
-    initTelemetry();
     initMigration();
     initCommandCheckers();
     initDefaultUserPermissionForTask();
@@ -1454,6 +1464,8 @@ public abstract class ProcessEngineConfigurationImpl extends ProcessEngineConfig
       ensureNotNull("couldn't deduct database type from database product name '" + databaseProductName + "'", "databaseType", databaseType);
       LOG.debugDatabaseType(databaseType);
 
+      initDatabaseVendorAndVersion(databaseMetaData);
+
     } catch (SQLException e) {
       LOG.databaseConnectionAccessException(e);
     } finally {
@@ -1495,6 +1507,11 @@ public abstract class ProcessEngineConfigurationImpl extends ProcessEngineConfig
     }
 
     return databaseName;
+  }
+
+  protected void initDatabaseVendorAndVersion(DatabaseMetaData databaseMetaData) throws SQLException {
+    databaseVendor = databaseMetaData.getDatabaseProductName();
+    databaseVersion = databaseMetaData.getDatabaseProductVersion();
   }
 
   // myBatis SqlSessionFactory ////////////////////////////////////////////////
@@ -2190,12 +2207,6 @@ public abstract class ProcessEngineConfigurationImpl extends ProcessEngineConfig
 
     metricsRegistry.createMeter(Metrics.EXECUTED_DECISION_INSTANCES);
     metricsRegistry.createMeter(Metrics.EXECUTED_DECISION_ELEMENTS);
-  }
-
-  protected void initTelemetry() {
-    if (initializeTelemetry) {
-      // initialize telemetry reporter
-    }
   }
 
   protected void initSerialization() {
@@ -4643,6 +4654,33 @@ public abstract class ProcessEngineConfigurationImpl extends ProcessEngineConfig
 
   public ProcessEngineConfigurationImpl setTelemetryEndpoint(String telemetryEndpoint) {
     this.telemetryEndpoint = telemetryEndpoint;
+    return this;
+  }
+
+  public TelemetryReporter getTelemetryReporter() {
+    return telemetryReporter;
+  }
+
+  public ProcessEngineConfigurationImpl setTelemetryReporter(TelemetryReporter telemetryReporter) {
+    this.telemetryReporter = telemetryReporter;
+    return this;
+  }
+
+  public HttpClient getTelemetryHttpClient() {
+    return telemetryHttpClient;
+  }
+ 
+  public ProcessEngineConfigurationImpl setTelemetryHttpClient(HttpClient telemetryHttpClient) {
+    this.telemetryHttpClient = telemetryHttpClient;
+    return this;
+  }
+
+  public Data getTelemetryData() {
+    return telemetryData;
+  }
+
+  public ProcessEngineConfigurationImpl setTelemetryData(Data telemetryData) {
+    this.telemetryData = telemetryData;
     return this;
   }
 

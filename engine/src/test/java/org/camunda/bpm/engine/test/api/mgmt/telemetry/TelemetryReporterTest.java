@@ -68,15 +68,15 @@ public class TelemetryReporterTest {
   @Rule
   public RuleChain ruleChain = RuleChain.outerRule(engineRule).around(testRule);
 
+  @Rule
+  public WireMockRule wireMockRule = new WireMockRule(8083);
+
   protected ProcessEngineConfigurationImpl configuration;
 
   @Before
   public void init() {
     configuration = engineRule.getProcessEngineConfiguration();
   }
-
-  @Rule
-  public WireMockRule wireMockRule = new WireMockRule(8083);
 
   @Test
   public void shouldSendTelemetry() {

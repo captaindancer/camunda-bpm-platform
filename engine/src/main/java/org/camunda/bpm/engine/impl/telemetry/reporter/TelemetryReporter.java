@@ -60,15 +60,13 @@ public class TelemetryReporter {
     timer.scheduleAtFixedRate(telemetrySendingTask, reportingIntervalInMillis, reportingIntervalInMillis);
   }
 
-  public void stop(boolean reportLastTime) {
+  public void stop() {
     if (timer != null) {
       // cancel the timer
       timer.cancel();
       timer = null;
-      if (reportLastTime) {
-        // collect and send manually for the last time
-        reportNow();
-      }
+      // collect and send manually for the last time
+      reportNow();
     }
   }
 

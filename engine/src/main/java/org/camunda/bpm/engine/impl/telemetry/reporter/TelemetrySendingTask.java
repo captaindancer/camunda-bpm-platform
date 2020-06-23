@@ -37,7 +37,7 @@ import com.google.gson.Gson;
 
 public class TelemetrySendingTask extends TimerTask {
 
-  private static final TelemetryLogger LOG = ProcessEngineLogger.TELEMETRY_LOGGER;
+  protected static final TelemetryLogger LOG = ProcessEngineLogger.TELEMETRY_LOGGER;
 
   protected CommandExecutor commandExecutor;
   protected String telemetryEndpoint;
@@ -69,6 +69,7 @@ public class TelemetrySendingTask extends TimerTask {
       @Override
       public Void execute(CommandContext commandContext) {
         try {
+          // check if we need to send the data again
           HttpPost request = new HttpPost(telemetryEndpoint);
           String telemetryData = new Gson().toJson(data);
           StringEntity requestBody = new StringEntity(telemetryData, StandardCharsets.UTF_8);
