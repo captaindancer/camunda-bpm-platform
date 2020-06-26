@@ -45,6 +45,7 @@ import javax.naming.InitialContext;
 import javax.sql.DataSource;
 
 import org.apache.http.client.HttpClient;
+import org.apache.http.impl.client.HttpClientBuilder;
 import org.apache.ibatis.builder.xml.XMLConfigBuilder;
 import org.apache.ibatis.datasource.pooled.PooledDataSource;
 import org.apache.ibatis.mapping.Environment;
@@ -335,6 +336,9 @@ import org.camunda.bpm.engine.impl.scripting.engine.VariableScopeResolverFactory
 import org.camunda.bpm.engine.impl.scripting.env.ScriptEnvResolver;
 import org.camunda.bpm.engine.impl.scripting.env.ScriptingEnvironment;
 import org.camunda.bpm.engine.impl.telemetry.dto.Data;
+import org.camunda.bpm.engine.impl.telemetry.dto.Database;
+import org.camunda.bpm.engine.impl.telemetry.dto.Internals;
+import org.camunda.bpm.engine.impl.telemetry.dto.Product;
 import org.camunda.bpm.engine.impl.telemetry.reporter.TelemetryReporter;
 import org.camunda.bpm.engine.impl.util.IoUtil;
 import org.camunda.bpm.engine.impl.util.ParseUtil;
@@ -391,7 +395,9 @@ public abstract class ProcessEngineConfigurationImpl extends ProcessEngineConfig
 
   public static final int DEFAULT_INVOCATIONS_PER_BATCH_JOB = 1;
 
-
+  protected static final String EDITION_ENTERPRISE = "enterprise";
+  protected static final String EDITION_COMMUNITY = "community";
+  protected static final String PRODUCT_NAME = "Camunda BPM";
 
   public static SqlSessionFactory cachedSqlSessionFactory;
 
@@ -948,6 +954,7 @@ public abstract class ProcessEngineConfigurationImpl extends ProcessEngineConfig
     initPermissionProvider();
     initHostName();
     initMetrics();
+    initTelemetry();
     initMigration();
     initCommandCheckers();
     initDefaultUserPermissionForTask();
@@ -2566,6 +2573,35 @@ public abstract class ProcessEngineConfigurationImpl extends ProcessEngineConfig
     if (adminGroups.isEmpty() || !(adminGroups.contains(Groups.CAMUNDA_ADMIN))) {
       adminGroups.add(Groups.CAMUNDA_ADMIN);
     }
+  }
+
+  protected void initTelemetry() {
+    if (telemetryData == null) {
+      initTelemetryData();
+    }
+    if (telemetryHttpClient == null) {
+      telemetryHttpClient = HttpClientBuilder.create().build();
+    }
+    telemetryReporter = new TelemetryReporter(commandExecutorTxRequired,
+        telemetryEndpoint,
+        telemetryData,
+        telemetryHttpClient);
+  }
+
+  protected void initTelemetryData() {
+      Database database = new Database(databaseVendor, databaseVersion);
+      Internals internals = new Internals(database);
+
+      String edition = EDITION_COMMUNITY;
+      String version = ProcessEngineConfigurationImpl.class.getPackage().getImplementationVersion();
+
+      if (version != null && version.contains("-ee")) {
+        version = version.split("-")[0]; // trim `-ee` suffix
+        edition = EDITION_ENTERPRISE;
+      }
+
+      Product product = new Product(PRODUCT_NAME, version, edition, internals);
+      telemetryData = new Data(installationId, product);
   }
 
   // getters and setters //////////////////////////////////////////////////////
